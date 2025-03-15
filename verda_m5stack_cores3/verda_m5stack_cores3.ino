@@ -1,131 +1,128 @@
-#include <M5Unified.h>
-#include <lvgl.h>
+#if defined(ARDUINO)
 
-// **棋盤格設定**
-#define GRID_SIZE 4   // 棋盤格大小 (4x4)
-#define CELL_SIZE 50  // 每個格子的大小
-#define BOARD_X 20    // 棋盤格 X 偏移量
-#define BOARD_Y 20    // 棋盤格 Y 偏移量
+#define WIFI_SSID     "..."
+#define WIFI_PASSWORD "..."
+#define NTP_TIMEZONE  "UTC-8"
+#define NTP_SERVER1   "0.pool.ntp.org"
+#define NTP_SERVER2   "1.pool.ntp.org"
+#define NTP_SERVER3   "2.pool.ntp.org"
 
-// **按鈕 GPIO 設定**
-#define BTN_BLUE  8  // 🔵 藍色按鈕 (GPIO 8)
-#define BTN_RED   9  // 🔴 紅色按鈕 (GPIO 9)
+#include <WiFi.h>
 
-// **LVGL 變數**
-static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf1[320 * 10];
-static lv_disp_drv_t disp_drv;
-lv_obj_t *grid[GRID_SIZE][GRID_SIZE];  // 棋盤格
+// Different versions of the framework have different SNTP header file names and
+// availability.
+#if __has_include(<esp_sntp.h>)
+#include <esp_sntp.h>
+#define SNTP_ENABLED 1
+#elif __has_include(<sntp.h>)
+#include <sntp.h>
+#define SNTP_ENABLED 1
+#endif
 
-// **隨機產生一個方塊**
-void create_random_square(lv_color_t color) {
-    int x = random(GRID_SIZE);
-    int y = random(GRID_SIZE);
+#endif
 
-    lv_obj_t *square = lv_obj_create(lv_scr_act());  
-    lv_obj_set_size(square, CELL_SIZE, CELL_SIZE);
-    lv_obj_set_style_bg_color(square, color, LV_PART_MAIN);
-    lv_obj_align(square, LV_ALIGN_TOP_LEFT, BOARD_X + x * CELL_SIZE, BOARD_Y + y * CELL_SIZE);
-    
-    Serial.println("🖥️ UI Updated - Marking screen for redraw...");
-    lv_obj_invalidate(square);  // **標記畫面需要更新**
+#ifndef SNTP_ENABLED
+#define SNTP_ENABLED 0
+#endif
 
-    Serial.println("🚀 Forcing LVGL refresh now...");
-    lv_refr_now(NULL);  // **強制刷新 LVGL**
-}
+#include <M5CoreS3.h>
 
-// **讀取按鈕並更新畫面**
-void check_buttons() {
-    if (digitalRead(BTN_BLUE) == LOW) {  // 按鈕按下時 GPIO 為 LOW
-        Serial.println("🔵 BLUE Button Pressed!");
-        create_random_square(lv_color_make(0, 0, 255));  // 藍色方塊
-        delay(200);  // 按鍵防抖
-    }
-    if (digitalRead(BTN_RED) == LOW) {  // 按鈕按下時 GPIO 為 LOW
-        Serial.println("🔴 RED Button Pressed!");
-        create_random_square(lv_color_make(255, 0, 0));  // 紅色方塊
-        delay(200);  // 按鍵防抖
-    }
-}
+void setup(void) {
+    CoreS3.begin();
 
-// **LVGL Flush Callback**
-void my_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-    Serial.println("🔥 ENTERED flush_cb!");
-
-    // **檢查 color_p 是否為 NULL，避免崩潰**
-    if (!color_p) {
-        Serial.println("❌ ERROR: color_p is NULL!");
-        lv_disp_flush_ready(disp);
-        return;
-    }
-
-    M5.Lcd.startWrite();
-    M5.Lcd.setAddrWindow(area->x1, area->y1, lv_area_get_width(area), lv_area_get_height(area));
-    M5.Lcd.pushColors((uint16_t *)color_p, lv_area_get_width(area) * lv_area_get_height(area), true);
-    M5.Lcd.endWrite();
-
-    Serial.println("✅ Flush completed!");
-    lv_disp_flush_ready(disp);  // **這行一定要執行，告知 LVGL 刷新已完成**
-}
-
-// **Setup**
-void setup() {
-    Serial.begin(115200);
-    Serial.println("🚀 Initializing M5Stack CoreS3...");
-
-    // **初始化 M5Stack**
-    auto cfg = M5.config();
-    cfg.clear_display = true;
-    cfg.output_power = true;
-    M5.begin(cfg);
-
-    // **初始化 GPIO**
-    pinMode(BTN_BLUE, INPUT_PULLUP);
-    pinMode(BTN_RED, INPUT_PULLUP);
-
-    // **初始化 LVGL**
-    Serial.println("🚀 Initializing LVGL...");
-    lv_init();
-
-    // **設定 LVGL 顯示緩衝區**
-    lv_disp_draw_buf_init(&draw_buf, buf1, NULL, 320 * 10);
-    Serial.println("✅ LVGL Buffer Initialized");
-
-    // **初始化 LVGL 顯示驅動**
-    lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = 320;
-    disp_drv.ver_res = 240;
-    disp_drv.flush_cb = my_flush_cb;
-    disp_drv.draw_buf = &draw_buf;
-
-    // **註冊顯示驅動**
-    lv_disp_t *disp = lv_disp_drv_register(&disp_drv);
-    Serial.println("✅ Registered LVGL Display Driver");
-
-    // **檢查 `flush_cb` 是否真的被註冊**
-    // Serial.print("Checking if flush_cb is set: ");
-    // Serial.println(lv_disp_get_flush_cb(lv_disp_get_default()) ? "✅ Exists" : "❌ NULL");
-
-    // **建立 UI 畫面**
-    lv_obj_t *screen = lv_scr_act();
-    lv_obj_set_style_bg_color(screen, lv_color_white(), LV_PART_MAIN);  // 白色背景
-
-    // **建立棋盤格**
-    for (int x = 0; x < GRID_SIZE; x++) {
-        for (int y = 0; y < GRID_SIZE; y++) {
-            grid[x][y] = lv_obj_create(screen);
-            lv_obj_set_size(grid[x][y], CELL_SIZE, CELL_SIZE);
-            lv_obj_set_style_border_color(grid[x][y], lv_color_black(), LV_PART_MAIN);
-            lv_obj_set_style_border_width(grid[x][y], 1, LV_PART_MAIN);
-            lv_obj_align(grid[x][y], LV_ALIGN_TOP_LEFT, BOARD_X + x * CELL_SIZE, BOARD_Y + y * CELL_SIZE);
+    if (!CoreS3.Rtc.isEnabled()) {
+        Serial.println("RTC not found.");
+        for (;;) {
+            vTaskDelay(500);
         }
     }
-    Serial.println("✅ UI Created!");
+
+    Serial.println("RTC found.");
+
+    // It is recommended to set UTC for the RTC and ESP32 internal clocks.
+    /* /// setup RTC ( direct setting )
+      //                      YYYY  MM  DD      hh  mm  ss
+      CoreS3.Rtc.setDateTime( { { 2021, 12, 31 }, { 12, 34, 56 } } );
+
+    //*/
+
+    /// setup RTC ( NTP auto setting )
+
+    CoreS3.Display.println("WiFi Connecting...");
+
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.print('.');
+        delay(500);
+    }
+    CoreS3.Display.println("WiFi Connected.");
+    Serial.println("\r\n WiFi Connected.");
+
+    configTzTime(NTP_TIMEZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+
+#if SNTP_ENABLED
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) {
+        Serial.print('.');
+        delay(1000);
+    }
+    Serial.println("\r\n NTP Connected.");
+    CoreS3.Display.println("NTP Connected");
+#else
+    delay(1600);
+    struct tm timeInfo;
+    while (!getLocalTime(&timeInfo, 1000)) {
+        Serial.print('.');
+    };
+#endif
+
+    time_t t = time(nullptr) + 1;  // Advance one second.
+    while (t > time(nullptr))
+        ;  /// Synchronization in seconds
+    CoreS3.Rtc.setDateTime(gmtime(&t));
+    CoreS3.Display.clear();
 }
 
-// **Loop**
-void loop() {
-    check_buttons();  // 讀取按鈕訊號
-    lv_timer_handler();
-    delay(50);
+void loop(void) {
+    static constexpr const char* const wd[7] = {"Sun", "Mon", "Tue", "Wed",
+                                                "Thr", "Fri", "Sat"};
+
+    delay(500);
+
+    auto dt = CoreS3.Rtc.getDateTime();
+    Serial.printf("RTC   UTC  :%04d/%02d/%02d (%s)  %02d:%02d:%02d\r\n",
+                  dt.date.year, dt.date.month, dt.date.date,
+                  wd[dt.date.weekDay], dt.time.hours, dt.time.minutes,
+                  dt.time.seconds);
+    CoreS3.Display.setCursor(0, 0);
+    CoreS3.Display.printf("RTC   UTC  :%04d/%02d/%02d (%s)  %02d:%02d:%02d",
+                          dt.date.year, dt.date.month, dt.date.date,
+                          wd[dt.date.weekDay], dt.time.hours, dt.time.minutes,
+                          dt.time.seconds);
+
+    /// ESP32 internal timer
+    auto t = time(nullptr);
+    {
+        auto tm = gmtime(&t);  // for UTC.
+        Serial.printf("ESP32 UTC  :%04d/%02d/%02d (%s)  %02d:%02d:%02d\r\n",
+                      tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                      wd[tm->tm_wday], tm->tm_hour, tm->tm_min, tm->tm_sec);
+        CoreS3.Display.setCursor(0, 20);
+        CoreS3.Display.printf("ESP32 UTC  :%04d/%02d/%02d (%s)  %02d:%02d:%02d",
+                              tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                              wd[tm->tm_wday], tm->tm_hour, tm->tm_min,
+                              tm->tm_sec);
+    }
+
+    {
+        auto tm = localtime(&t);  // for local timezone.
+        Serial.printf("ESP32 %s:%04d/%02d/%02d (%s)  %02d:%02d:%02d\r\n",
+                      NTP_TIMEZONE, tm->tm_year + 1900, tm->tm_mon + 1,
+                      tm->tm_mday, wd[tm->tm_wday], tm->tm_hour, tm->tm_min,
+                      tm->tm_sec);
+        CoreS3.Display.setCursor(0, 40);
+        CoreS3.Display.printf("ESP32 %s:%04d/%02d/%02d (%s)  %02d:%02d:%02d",
+                              NTP_TIMEZONE, tm->tm_year + 1900, tm->tm_mon + 1,
+                              tm->tm_mday, wd[tm->tm_wday], tm->tm_hour,
+                              tm->tm_min, tm->tm_sec);
+    }
 }
